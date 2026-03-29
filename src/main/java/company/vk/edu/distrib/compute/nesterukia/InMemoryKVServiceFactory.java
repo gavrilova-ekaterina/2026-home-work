@@ -5,9 +5,12 @@ import company.vk.edu.distrib.compute.KVServiceFactory;
 
 import java.io.IOException;
 
-public class FileSystemKVServiceFactory extends KVServiceFactory {
+public class InMemoryKVServiceFactory extends KVServiceFactory {
     @Override
     protected KVService doCreate(int port) throws IOException {
-        return new FileSystemKVService(port);
+        return new KVServiceImpl(
+                port,
+                new InMemoryKVDao()
+        );
     }
 }
