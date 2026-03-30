@@ -7,8 +7,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-import javax.annotation.Nullable;
-
 public class PopovIgorKVDaoPersistent implements Dao<byte[]> {
     private final AtomicBoolean active = new AtomicBoolean(true);
     private final Path storageDir;
@@ -20,7 +18,6 @@ public class PopovIgorKVDaoPersistent implements Dao<byte[]> {
         }
     }
 
-    @Nullable
     @Override
     public byte[] get(String key) throws IOException {
         this.checkActive();
@@ -41,7 +38,7 @@ public class PopovIgorKVDaoPersistent implements Dao<byte[]> {
             throw new IllegalArgumentException("Value cannot be null");
         }
 
-        final Path file = this.storageDir.resolve(key);
+        final Path file = this.storageDir.resolve(Paths.get(key).getFileName().toString());
         Files.write(file, value);
     }
 
@@ -51,7 +48,7 @@ public class PopovIgorKVDaoPersistent implements Dao<byte[]> {
         if (key == null) {
             throw new IllegalArgumentException("Key cannot be null");
         }
-        final Path file = this.storageDir.resolve(key);
+        final Path file = this.storageDir.resolve(Paths.get(key).getFileName().toString());
         Files.deleteIfExists(file);
     }
 
