@@ -12,13 +12,13 @@ public class ShardedKVCluster implements KVCluster {
     private static final String LOCALHOST = "http://localhost:";
     private final List<String> endpoints;
     private final Map<String, ShardedFileKVService> nodesByEndpoints = new ConcurrentHashMap<>();
-    private final HashingAlgorithm hashingAlgorithm;
+    private final HashingStrategy hashingStrategy;
 
     public ShardedKVCluster(List<Integer> ports) {
         this.endpoints = ports.stream()
                 .map(this::toEndpoint)
                 .toList();
-        this.hashingAlgorithm = HashingAlgorithmConfigUtils.getHashingAlgorithm();
+        this.hashingStrategy = resolveHashingStrategy(HashingAlgorithmConfigUtils.getHashingAlgorithm());
     }
 
     @Override
@@ -36,7 +36,7 @@ public class ShardedKVCluster implements KVCluster {
             int port = parsePort(endpoint);
 
             try {
-                node = new ShardedFileKVService(port, resolveHashingStrategy(hashingAlgorithm));
+                node = new ShardedFileKVService(port, hashingStrategy);
             } catch (IOException e) {
                 throw new IllegalStateException("Failed to start KV node at endpoint: " + endpoint, e);
             }
