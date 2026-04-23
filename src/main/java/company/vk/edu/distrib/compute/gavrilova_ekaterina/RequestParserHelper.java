@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 
 public final class RequestParserHelper {
 
+    private static final String PARAM_ID = "id";
+
     private RequestParserHelper() {
     }
 
@@ -18,7 +20,7 @@ public final class RequestParserHelper {
 
         for (String param : query.split("&")) {
             String[] kv = param.split("=");
-            if (kv.length == 2 && "id".equals(kv[0])) {
+            if (kv.length == 2 && PARAM_ID.equals(kv[0])) {
                 return URLDecoder.decode(kv[1], StandardCharsets.UTF_8);
             }
         }

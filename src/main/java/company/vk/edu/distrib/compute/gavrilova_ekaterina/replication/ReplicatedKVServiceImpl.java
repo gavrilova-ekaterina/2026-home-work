@@ -19,14 +19,14 @@ public class ReplicatedKVServiceImpl implements ReplicatedService {
 
     private static final Logger log = LoggerFactory.getLogger(ReplicatedKVServiceImpl.class);
     private final int replicationFactor;
-    private final int port;
+    private final int localPort;
     private final HttpServer server;
     private final ReplicaSynchronizer replicaSynchronizer;
     private final List<ReplicaNode> replicas = new ArrayList<>();
     private final Set<String> keys = ConcurrentHashMap.newKeySet();
 
     public ReplicatedKVServiceImpl(int port) throws IOException {
-        this.port = port;
+        this.localPort = port;
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
         this.replicationFactor = ReplicationConfigUtils.getReplicationFactor();
 
@@ -56,7 +56,7 @@ public class ReplicatedKVServiceImpl implements ReplicatedService {
 
     @Override
     public int port() {
-        return port;
+        return localPort;
     }
 
     @Override
@@ -80,7 +80,6 @@ public class ReplicatedKVServiceImpl implements ReplicatedService {
             log.info("Replica sync completed nodeId={}", nodeId);
         } catch (IOException e) {
             log.error("Replica sync failed nodeId={}", nodeId, e);
-            throw new RuntimeException(e);
         }
     }
 
