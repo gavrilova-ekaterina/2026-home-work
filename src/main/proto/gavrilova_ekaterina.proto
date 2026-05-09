@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package company.vk.edu.distrib.compute.gavrilova_ekaterina.grpc;
+
+option java_multiple_files = true;
+option java_package = "company.vk.edu.distrib.compute.gavrilova_ekaterina.grpc";
+
+service InternalKvService {
+  rpc ProcessRequest (InternalRequest) returns (InternalResponse);
+}
+
+message InternalRequest {
+  string method = 1;
+  string key = 2;
+  bytes body = 3;
+}
+
+message InternalResponse {
+  int32 status_code = 1;
+  bytes body = 2;
+}

@@ -70,11 +70,18 @@ public class ShardedKVCluster implements KVCluster {
     }
 
     private String toEndpoint(int port) {
-        return LOCALHOST + port;
+        int grpcPort = port + 1000;
+        return LOCALHOST + port + "?grpc=" + grpcPort;
     }
 
     private int parsePort(String endpoint) {
-        return Integer.parseInt(endpoint.substring(LOCALHOST.length()));
+        String portPart = endpoint.substring(LOCALHOST.length());
+
+        int queryIndex = portPart.indexOf('?');
+        if (queryIndex != -1) {
+            portPart = portPart.substring(0, queryIndex);
+        }
+        return Integer.parseInt(portPart);
     }
 
     private HashingStrategy resolveHashingStrategy(HashingAlgorithm hashingAlgorithm) {

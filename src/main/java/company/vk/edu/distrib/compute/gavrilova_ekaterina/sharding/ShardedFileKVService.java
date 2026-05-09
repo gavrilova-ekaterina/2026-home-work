@@ -5,6 +5,11 @@ import com.sun.net.httpserver.HttpServer;
 import company.vk.edu.distrib.compute.Dao;
 import company.vk.edu.distrib.compute.KVService;
 import company.vk.edu.distrib.compute.gavrilova_ekaterina.FileDao;
+import company.vk.edu.distrib.compute.gavrilova_ekaterina.grpc.InternalKvServiceGrpc;
+import company.vk.edu.distrib.compute.gavrilova_ekaterina.grpc.InternalRequest;
+import company.vk.edu.distrib.compute.gavrilova_ekaterina.grpc.InternalResponse;
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -12,18 +17,15 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.URI;
 import java.net.URLDecoder;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 public class ShardedFileKVService implements KVService {
 
@@ -33,7 +35,9 @@ public class ShardedFileKVService implements KVService {
     private final Dao<byte[]> storage;
     private final String selfUrl;
     private final HashingStrategy hashingStrategy;
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private io.grpc.Server grpcServer;
+    private int grpcPort;
+    private final Map<String, GrpcClient> grpcClients = new ConcurrentHashMap<>();
 
     public ShardedFileKVService(int port, HashingStrategy hashingStrategy) throws IOException {
         this.server = HttpServer.create(new InetSocketAddress(port), 0);
@@ -46,17 +50,26 @@ public class ShardedFileKVService implements KVService {
 
     public void setNodes(List<String> nodes) {
         this.hashingStrategy.setEndpoints(nodes);
+        this.grpcPort = extractGrpcPortFromNodes(nodes, selfUrl);
     }
 
     @Override
     public void start() {
         server.start();
+        startGrpcServer();
         log.info("ShardedFileKVService started at {}", selfUrl);
     }
 
     @Override
     public void stop() {
         server.stop(0);
+        if (grpcServer != null) {
+            grpcServer.shutdownNow();
+        }
+        for (GrpcClient client : grpcClients.values()) {
+            client.channel.shutdownNow();
+        }
+        grpcClients.clear();
         log.info("ShardedFileKVService stopped at {}", selfUrl);
     }
 
@@ -93,8 +106,9 @@ public class ShardedFileKVService implements KVService {
             }
 
             String targetNode = resolveNode(id);
+            String targetHttpUrl = targetNode.split("\\?")[0];
 
-            if (!selfUrl.equals(targetNode)) {
+            if (!selfUrl.equals(targetHttpUrl)) {
                 proxyRequest(exchange, targetNode, id);
                 return;
             }
@@ -117,39 +131,30 @@ public class ShardedFileKVService implements KVService {
 
     private void proxyRequest(HttpExchange exchange, String target, String id) throws IOException {
         try {
-            String url = target + "/v0/entity?id="
-                    + URLEncoder.encode(id, StandardCharsets.UTF_8);
+            String host = "localhost";
+            int grpcPort = extractGrpcPort(target);
 
-            HttpRequest.Builder builder = HttpRequest.newBuilder()
-                    .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(1));
+            byte[] body = exchange.getRequestBody().readAllBytes();
 
-            switch (exchange.getRequestMethod()) {
-                case "GET" -> builder.GET();
+            InternalRequest request = InternalRequest.newBuilder()
+                    .setMethod(exchange.getRequestMethod())
+                    .setKey(id)
+                    .setBody(com.google.protobuf.ByteString.copyFrom(body))
+                    .build();
 
-                case "PUT" -> {
-                    byte[] body = exchange.getRequestBody().readAllBytes();
-                    builder.PUT(HttpRequest.BodyPublishers.ofByteArray(body));
-                }
+            GrpcClient client = getClient(host, grpcPort);
 
-                case "DELETE" -> builder.DELETE();
+            InternalResponse response = client.stub
+                    .withDeadlineAfter(200, TimeUnit.MILLISECONDS)
+                    .processRequest(request);
 
-                default -> {
-                    sendResponse(exchange, 405, "Method Not Allowed".getBytes());
-                    return;
-                }
-            }
-
-            HttpResponse<byte[]> response = httpClient.send(
-                    builder.build(),
-                    HttpResponse.BodyHandlers.ofByteArray()
-            );
-
-            sendResponse(exchange, response.statusCode(), response.body());
+            sendResponse(exchange,
+                    response.getStatusCode(),
+                    response.getBody().toByteArray());
 
         } catch (Exception e) {
-            log.error("Unexpected proxy error", e);
-            sendResponse(exchange, 500, "Internal server error".getBytes());
+            log.error("gRPC proxy error", e);
+            sendResponse(exchange, 500, "gRPC error".getBytes());
         }
     }
 
@@ -191,4 +196,77 @@ public class ShardedFileKVService implements KVService {
             os.write(bytes);
         }
     }
+
+    private GrpcClient getClient(String host, int port) {
+        String key = host + ":" + port;
+
+        return grpcClients.computeIfAbsent(key, k -> {
+            ManagedChannel channel = ManagedChannelBuilder
+                    .forAddress(host, port)
+                    .usePlaintext()
+                    .build();
+
+            InternalKvServiceGrpc.InternalKvServiceBlockingStub stub =
+                    InternalKvServiceGrpc.newBlockingStub(channel);
+
+            return new GrpcClient(channel, stub);
+        });
+    }
+
+    private int extractGrpcPort(String endpoint) {
+        String[] parts = endpoint.split("\\?grpc=");
+        if (parts.length != 2) {
+            throw new IllegalArgumentException("Bad endpoint: " + endpoint);
+        }
+        return Integer.parseInt(parts[1]);
+    }
+
+    private int extractGrpcPortFromNodes(List<String> nodes, String selfUrl) {
+        String httpPort = selfUrl.substring(LOCALHOST.length()).split("\\?")[0];
+
+        return nodes.stream()
+                .filter(n -> n.startsWith(LOCALHOST + httpPort))
+                .map(n -> Integer.parseInt(n.split("\\?grpc=")[1]))
+                .findFirst()
+                .orElseThrow(() -> new IllegalStateException("gRPC port not found"));
+    }
+
+    public byte[] localGet(String id) throws IOException {
+        return storage.get(id);
+    }
+
+    public void localPut(String id, byte[] data) throws IOException {
+        storage.upsert(id, data);
+    }
+
+    public void localDelete(String id) throws IOException {
+        storage.delete(id);
+    }
+
+    private void startGrpcServer() {
+        try {
+            grpcServer = io.grpc.ServerBuilder
+                    .forPort(grpcPort)
+                    .addService(new GrpcInternalService(this))
+                    .build()
+                    .start();
+
+            log.info("gRPC server started on port {}", grpcPort);
+
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to start gRPC server", e);
+        }
+    }
+
+    private static final class GrpcClient {
+        final ManagedChannel channel;
+        final InternalKvServiceGrpc.InternalKvServiceBlockingStub stub;
+
+        public GrpcClient(ManagedChannel channel,
+                          InternalKvServiceGrpc.InternalKvServiceBlockingStub stub) {
+            this.channel = channel;
+            this.stub = stub;
+        }
+    }
+
 }
