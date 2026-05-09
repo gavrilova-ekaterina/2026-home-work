@@ -30,6 +30,7 @@ import java.util.concurrent.TimeUnit;
 public class ShardedFileKVService implements KVService {
 
     private static final String LOCALHOST = "http://localhost:";
+    private static final int GRPC_ENDPOINT_PARTS = 2;
     private static final Logger log = LoggerFactory.getLogger(ShardedFileKVService.class);
     private final HttpServer server;
     private final Dao<byte[]> storage;
@@ -215,7 +216,7 @@ public class ShardedFileKVService implements KVService {
 
     private int extractGrpcPort(String endpoint) {
         String[] parts = endpoint.split("\\?grpc=");
-        if (parts.length != 2) {
+        if (parts.length != GRPC_ENDPOINT_PARTS) {
             throw new IllegalArgumentException("Bad endpoint: " + endpoint);
         }
         return Integer.parseInt(parts[1]);
@@ -254,7 +255,7 @@ public class ShardedFileKVService implements KVService {
             log.info("gRPC server started on port {}", grpcPort);
 
         } catch (IOException e) {
-            throw new RuntimeException("Failed to start gRPC server", e);
+            throw new IllegalStateException("Failed to start gRPC server", e);
         }
     }
 
