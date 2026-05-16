@@ -23,6 +23,8 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class AuditServiceImpl implements AuditService {
 
@@ -38,6 +40,7 @@ public class AuditServiceImpl implements AuditService {
     private String consumerGroupId;
     private KafkaConsumer<String, String> consumer;
     private ExecutorService executor;
+    private final Lock startLock = new ReentrantLock();
 
     public AuditServiceImpl(String bootstrapServers, String consumerGroupId) throws IOException {
         this.bootstrapServers = bootstrapServers;
@@ -46,11 +49,16 @@ public class AuditServiceImpl implements AuditService {
     }
 
     @Override
-    public synchronized void start() {
-        startConsumer(consumerGroupId);
+    public void start() {
+        startLock.lock();
+        try {
+            startConsumer(consumerGroupId);
+        } finally {
+            startLock.unlock();
+        }
     }
 
-    private synchronized void startConsumer(String consumerGroupId) {
+    private void startConsumer(String consumerGroupId) {
         if (!running.compareAndSet(false, true)) {
             return;
         }
@@ -63,19 +71,22 @@ public class AuditServiceImpl implements AuditService {
     }
 
     @Override
-    public synchronized void stop() {
-        if (!running.compareAndSet(true, false)) {
-            return;
+    public void stop() {
+        startLock.lock();
+        try {
+            if (!running.compareAndSet(true, false)) {
+                return;
+            }
+            if (consumer != null) {
+                consumer.wakeup();
+            }
+            if (executor != null) {
+                executor.shutdown();
+                awaitExecutorStop();
+            }
+        } finally {
+            startLock.unlock();
         }
-        if (consumer != null) {
-            consumer.wakeup();
-        }
-        if (executor != null) {
-            executor.shutdown();
-            awaitExecutorStop();
-            executor = null;
-        }
-        consumer = null;
     }
 
     @Override

@@ -86,8 +86,6 @@ public class AuditableKVServiceImpl implements AuditableKVService {
                 p.flush();
             } catch (Exception ignored) {
                 // ignore exceptions during shutdown
-            } finally {
-                producer = null;
             }
         }
         termination.complete(null);
