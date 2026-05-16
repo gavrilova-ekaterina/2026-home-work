@@ -51,21 +51,22 @@ public class AuditServiceImpl implements AuditService {
     }
 
     private synchronized void startConsumer(String consumerGroupId) {
-        if (running.get()) {
+        if (!running.compareAndSet(false, true)) {
             return;
         }
         this.consumerGroupId = consumerGroupId;
         loadFromDiskOnce();
         consumer = new KafkaConsumer<>(consumerProperties(consumerGroupId));
         consumer.subscribe(List.of(AUDIT_TOPIC));
-        running.set(true);
         executor = Executors.newSingleThreadExecutor();
         executor.submit(this::pollLoop);
     }
 
     @Override
     public synchronized void stop() {
-        running.set(false);
+        if (!running.compareAndSet(true, false)) {
+            return;
+        }
         if (consumer != null) {
             consumer.wakeup();
         }

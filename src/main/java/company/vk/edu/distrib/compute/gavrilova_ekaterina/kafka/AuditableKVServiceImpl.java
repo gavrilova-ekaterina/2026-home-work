@@ -21,6 +21,7 @@ import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 public class AuditableKVServiceImpl implements AuditableKVService {
@@ -41,6 +42,7 @@ public class AuditableKVServiceImpl implements AuditableKVService {
     private boolean async = true;
     private Producer<String, String> producer;
     private HttpServer server;
+    private final AtomicBoolean running = new AtomicBoolean(true);
 
     public AuditableKVServiceImpl(int port) {
         this.port = port;
@@ -73,16 +75,20 @@ public class AuditableKVServiceImpl implements AuditableKVService {
 
     @Override
     public void stop() {
-        HttpServer currentServer = server;
-        if (currentServer != null) {
-            currentServer.stop(0);
-            server = null;
+        if (!running.compareAndSet(true, false)) {
+            return;
         }
-        Producer<String, String> currentProducer = producer;
-        if (currentProducer != null) {
-            currentProducer.flush();
-            currentProducer.close();
-            producer = null;
+        if (server != null) {
+            server.stop(0);
+        }
+        if (producer != null) {
+            try (Producer<String, String> p = producer) {
+                p.flush();
+            } catch (Exception ignored) {
+                // ignore exceptions during shutdown
+            } finally {
+                producer = null;
+            }
         }
         termination.complete(null);
     }
